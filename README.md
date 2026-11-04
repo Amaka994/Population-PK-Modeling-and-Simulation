@@ -80,6 +80,28 @@ The project uses:
 - **Matplotlib:** Visualization of concentration–time profiles and simulation results.
 - **Google Colab:** Interactive Python notebook environment.
 
+## R Markdown
+## Featured Project: Population PK Modeling and Monte Carlo Simulation in R
+
+This project demonstrates reproducible pharmacokinetic modeling, exploratory data analysis, and Monte Carlo simulation using **R and R Markdown**.
+
+### View the Complete R Project Report
+
+**[View Population PK Modeling and Monte Carlo Simulation Report](https://amaka994.github.io/Population-PK-Modeling-and-Simulation/01_PK_Modeling_and_Monte_Carlo.html)**
+
+The report includes:
+
+- Exploratory analysis of simulated pharmacokinetic data from 120 subjects
+- Individual and population concentration–time profiles
+- One-compartment repeated intravenous bolus pharmacokinetic modeling
+- Monte Carlo simulation of 10,000 virtual subjects
+- Population variability and 90% prediction intervals
+- Observed versus simulated concentration–time visualization
+- Reproducible R code, figures, and simulation results
+
+**Tools:** R, RStudio, R Markdown, ggplot2, dplyr, and Monte Carlo simulation.
+
+
 ## Repository Contents
 
 `01_PK_Data_Exploration.ipynb` — Exploratory analysis and visualization of simulated pharmacokinetic data.
