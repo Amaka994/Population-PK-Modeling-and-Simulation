@@ -1,0 +1,1549 @@
+---
+title: "Population_PK_Modeling_Simulation"
+author: "Amaka"
+date: "2026-11-03"
+output: html_document
+---
+
+# 1. Project Overview
+
+This project demonstrates exploratory pharmacokinetic
+data analysis using R.
+
+The dataset contains simulated one-compartment
+intravenous bolus pharmacokinetic data.
+
+The objectives are to examine the dataset structure,
+identify dosing and observation records, visualize
+individual concentration-time profiles, and
+characterize population pharmacokinetic variability.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+
+dir.create("results/figures",
+           recursive = TRUE,
+           showWarnings = FALSE)
+
+dir.create("results/tables",
+           recursive = TRUE,
+           showWarnings = FALSE)
+```
+
+
+
+# 2. Import Pharmacokinetic Dataset
+
+```{r data-import, include=FALSE}
+pk_data <- read_csv(
+  "C:/Users/ukaju/Dropbox/Developing Package/Bolus_1CPT.csv",
+  show_col_types = FALSE
+)
+
+
+```
+
+```{r}
+dim(pk_data)
+names(pk_data)
+
+kable(
+  head(pk_data),
+  caption = "First six records of the PK dataset"
+)
+```
+
+# 3. Dataset Summary
+
+```{r dataset-summary}
+observations <- pk_data %>%
+  filter(EVID == 0, MDV == 0)
+
+dataset_summary <- data.frame(
+  Subjects = n_distinct(pk_data$ID),
+  Records = nrow(pk_data),
+  Variables = ncol(pk_data),
+  Observations = nrow(observations),
+  Missing_Values = sum(is.na(pk_data))
+)
+
+kable(
+  dataset_summary,
+  caption = "Summary of PK dataset"
+)
+
+write_csv(
+  dataset_summary,
+  "results/tables/Dataset_Summary.csv"
+)
+```
+
+# 4. Dosing and Observation Records
+
+```{r event-records}
+event_summary <- pk_data %>%
+  count(EVID, MDV, name = "Records")
+
+kable(
+  event_summary,
+  caption = "Distribution of dosing and observation records"
+)
+
+write_csv(
+  event_summary,
+  "results/tables/Event_Summary.csv"
+)
+```
+```{r}
+# 3.1 Descriptive Statistics of the PK Dataset
+
+#This section summarizes the distribution of pharmacokinetic
+#variables, including sampling time, observed concentrations,
+#clearance, and volume of distribution.
+
+# Select relevant PK variables
+pk_descriptive <- pk_data %>%
+  select(TIME, DV, DOSE, CL, V)
+
+# Generate descriptive statistics
+descriptive_summary <- data.frame(
+  Parameter = names(pk_descriptive),
+  Minimum = sapply(pk_descriptive, min, na.rm = TRUE),
+  Q1 = sapply(pk_descriptive, quantile, probs = 0.25, na.rm = TRUE),
+  Median = sapply(pk_descriptive, median, na.rm = TRUE),
+  Mean = sapply(pk_descriptive, mean, na.rm = TRUE),
+  Q3 = sapply(pk_descriptive, quantile, probs = 0.75, na.rm = TRUE),
+  Maximum = sapply(pk_descriptive, max, na.rm = TRUE)
+)
+
+# Display formatted summary
+knitr::kable(
+  descriptive_summary,
+  digits = 2,
+  row.names = FALSE,
+  caption = "Descriptive Statistics of PK Variables"
+)
+
+# Save summary for GitHub
+write.csv(
+  descriptive_summary,
+  "results/tables/Descriptive_PK_Statistics.csv",
+  row.names = FALSE
+)
+```
+```{r}
+# 4. Pharmacokinetic Sampling Time Distribution
+
+#The distribution of sampling times was examined to characterize the temporal coverage of pharmacokinetic observations.
+
+# Select observation records
+observations <- pk_data %>%
+  filter(EVID == 0, MDV == 0)
+
+# Plot sampling time distribution
+p_sampling <- ggplot(
+  observations,
+  aes(x = TIME)
+) +
+  geom_histogram(
+    bins = 40,
+    fill = "#00A3FF",
+    color = "white"
+  ) +
+  labs(
+    title = "Distribution of Pharmacokinetic Sampling Times",
+    x = "Time (hours)",
+    y = "Number of Observations"
+  ) +
+  theme_bw(base_size = 13)
+
+print(p_sampling)
+
+# Save figure
+ggsave(
+  "results/figures/Sampling_Time_Distribution.png",
+  plot = p_sampling,
+  width = 9,
+  height = 6,
+  dpi = 300
+)
+```
+```{r}
+
+# 5. Population Pharmacokinetic Visualization
+
+#This analysis evaluates interindividual variability
+#in observed drug concentration-time profiles.
+
+# Extract observation records
+observations <- pk_data %>%
+  filter(EVID == 0, MDV == 0)
+
+# Individual concentration-time profiles
+p_individual <- ggplot(
+  observations,
+  aes(x = TIME, y = DV, group = ID)
+) +
+  geom_line(
+    color = "#00A3FF",
+    alpha = 0.20,
+    linewidth = 0.4
+  ) +
+  labs(
+    title = "Individual PK Concentration-Time Profiles",
+    x = "Time (hours)",
+    y = "Observed Concentration (dataset units)"
+  ) +
+  theme_bw(base_size = 13)
+
+print(p_individual)
+
+ggsave(
+  "results/figures/Individual_PK_Profiles.png",
+  p_individual,
+  width = 9,
+  height = 6,
+  dpi = 300
+)
+
+# Population concentration summary
+# Summarize concentrations at observed sampling times
+population_summary <- observations %>%
+  group_by(TIME) %>%
+  summarise(
+    N = n(),
+    Median = median(DV),
+    P05 = quantile(DV, 0.05),
+    P95 = quantile(DV, 0.95),
+    .groups = "drop"
+  )
+
+# Restrict percentile ribbons to sampling times
+# with at least 5 observations
+population_plot_data <- population_summary %>%
+  filter(N >= 5)
+
+# Population median and percentile interval
+p_population <- ggplot(
+  population_plot_data,
+  aes(x = TIME)
+) +
+  geom_ribbon(
+    aes(ymin = P05, ymax = P95),
+    fill = "#00A3FF",
+    alpha = 0.20
+  ) +
+  geom_line(
+    aes(y = Median),
+    color = "#FF7F50",
+    linewidth = 1.1
+  ) +
+  labs(
+    title = "Population Concentration-Time Profile",
+    subtitle = "Observed Median and 5th-95th Percentiles",
+    x = "Time (hours)",
+    y = "Observed Concentration (dataset units)"
+  ) +
+  theme_bw(base_size = 13)
+
+print(p_population)
+
+ggsave(
+  "results/figures/Population_PK_Profile.png",
+  p_population,
+  width = 9,
+  height = 6,
+  dpi = 300
+)
+
+# Save population summary
+write.csv(
+  population_summary,
+  "results/tables/Population_PK_Summary.csv",
+  row.names = FALSE
+)
+```
+## Population Pharmacokinetic Profiles Across Sampling Windows
+
+### Objective
+
+To visualize observed concentration–time profiles and interindividual variability across three major sampling periods in a simulated repeated-dose intravenous bolus pharmacokinetic dataset.
+
+Population medians and empirical 5th–95th percentiles were calculated using 4-hour time bins. Each subject contributed at most one median concentration per bin.
+
+```{r population-pk-three-panels, echo=TRUE, warning=FALSE, message=FALSE, fig.width=12, fig.height=5.5}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# ============================================================
+# POPULATION PK: THREE SAMPLING WINDOWS
+# ============================================================
+
+# 1. Filter valid observations
+pk_obs <- pk_data %>%
+  filter(
+    EVID == 0,
+    MDV == 0,
+    is.finite(DV),
+    DV > 0,
+    is.finite(TIME),
+    TIME >= 0
+  )
+
+# 2. Define major sampling windows
+# Windows based on the observed concentration-time plot
+windows <- data.frame(
+  Window = c("Window 1", "Window 2", "Window 3"),
+  Start = c(0, 140, 212),
+  End = c(24, 164, 240)
+)
+
+# 3. Assign observations to sampling windows
+pk_window <- bind_rows(
+  lapply(seq_len(nrow(windows)), function(i) {
+    pk_obs %>%
+      filter(
+        TIME >= windows$Start[i],
+        TIME <= windows$End[i]
+      ) %>%
+      mutate(
+        Window = windows$Window[i],
+        Relative_Time = TIME - windows$Start[i]
+      )
+  })
+)
+
+# 4. Create 4-hour bins within each window
+bin_width <- 4
+
+pk_window <- pk_window %>%
+  mutate(
+    Time_Bin = floor(Relative_Time / bin_width) *
+      bin_width
+  )
+
+# 5. One concentration per subject per bin
+subject_bin <- pk_window %>%
+  group_by(Window, ID, Time_Bin) %>%
+  summarise(
+    Concentration = median(DV),
+    .groups = "drop"
+  )
+
+# 6. Population summary
+population_window_summary <- subject_bin %>%
+  group_by(Window, Time_Bin) %>%
+  summarise(
+    N = n(),
+    Median = median(Concentration),
+    P05 = quantile(Concentration, 0.05),
+    P95 = quantile(Concentration, 0.95),
+    .groups = "drop"
+  ) %>%
+  filter(N >= 10) %>%
+  mutate(
+    Window = factor(
+      Window,
+      levels = windows$Window
+    )
+  )
+
+# 7. Confirm sufficient data
+if (nrow(population_window_summary) == 0) {
+  stop("No time bins have at least 10 subjects.")
+}
+
+# 8. Generate professional three-panel figure
+p_pk <- ggplot(
+  population_window_summary,
+  aes(x = Time_Bin)
+) +
+  geom_ribbon(
+    aes(ymin = P05, ymax = P95),
+    fill = "#FF7F50",
+    alpha = 0.18
+  ) +
+  geom_line(
+    aes(y = Median),
+    color = "#00A3FF",
+    linewidth = 1.3
+  ) +
+  geom_point(
+    aes(y = Median),
+    color = "#00A3FF",
+    size = 1.8
+  ) +
+  facet_wrap(
+    ~ Window,
+    nrow = 1,
+    scales = "free_x"
+  ) +
+  scale_x_continuous(
+    breaks = seq(0, 28, by = 4),
+    expand = expansion(mult = c(0.03, 0.05))
+  ) +
+  scale_y_continuous(
+    labels = label_comma(),
+    expand = expansion(mult = c(0.02, 0.08))
+  ) +
+  labs(
+    title = "Population Pharmacokinetic Profiles",
+    subtitle = "Observed median and 90% empirical concentration interval",
+    x = "Time within sampling window (hours)",
+    y = "Observed concentration (dataset units)",
+    caption = paste(
+      "Blue: median | Coral: 5th–95th percentiles",
+      "| 4-hour bins | Minimum 10 subjects per bin"
+    )
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 17
+    ),
+    plot.subtitle = element_text(
+      size = 11,
+      color = "grey35"
+    ),
+    strip.background = element_rect(
+      fill = "#F2F5F8",
+      color = NA
+    ),
+    strip.text = element_text(
+      face = "bold",
+      size = 12
+    ),
+    axis.title = element_text(
+      face = "bold",
+      size = 11
+    ),
+    axis.text = element_text(
+      color = "grey25"
+    ),
+    panel.grid.major.y = element_line(
+      color = "grey92",
+      linewidth = 0.35
+    ),
+    plot.caption = element_text(
+      color = "grey40",
+      size = 9,
+      hjust = 0
+    ),
+    panel.spacing = grid::unit(1.2, "lines")
+  )
+
+print(p_pk)
+
+# 9. Save high-resolution figure
+dir.create(
+  "results/figures",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+ggsave(
+  filename = "results/figures/Population_PK_Three_Panels.png",
+  plot = p_pk,
+  width = 12,
+  height = 5.5,
+  dpi = 300,
+  bg = "white"
+)
+
+# 10. Save population summary
+dir.create(
+  "results/tables",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+write.csv(
+  population_window_summary,
+  "results/tables/Population_PK_Window_Summary.csv",
+  row.names = FALSE
+)
+
+# 11. Display summary
+knitr::kable(
+  population_window_summary,
+  digits = 2,
+  caption = "Population PK summary by sampling window"
+)
+```
+
+### Interpretation
+
+The three-panel visualization summarizes observed drug concentration distributions across the major sampling windows. The blue lines represent population median concentrations, while the coral-shaded regions indicate empirical 5th–95th percentile intervals.
+
+The analysis describes observed variability rather than uncertainty in model predictions. Differences in dose, clearance, and volume of distribution may contribute to the observed concentration distributions.
+
+The time windows were selected for visualization and should be verified against the dosing and sampling schedule before making mechanistic interpretations.
+
+```{r population-pk-final-figure, echo=TRUE, warning=FALSE, message=FALSE, fig.width=12, fig.height=5.8}
+
+# ==========================================================
+# PUBLICATION-STYLE POPULATION PK VISUALIZATION
+# ==========================================================
+
+library(ggplot2)
+library(scales)
+
+# Professional scientific color palette
+median_color <- "#2455A4"
+interval_color <- "#79C9BE"
+
+p_pk <- ggplot(
+  population_window_summary,
+  aes(x = Time_Bin)
+) +
+
+  # Empirical 90% concentration interval
+  geom_ribbon(
+    aes(ymin = P05, ymax = P95),
+    fill = interval_color,
+    alpha = 0.28
+  ) +
+
+  # Observed population median
+  geom_line(
+    aes(y = Median),
+    color = median_color,
+    linewidth = 1.4,
+    lineend = "round"
+  ) +
+
+  # White-centered observation markers
+  geom_point(
+    aes(y = Median),
+    shape = 21,
+    size = 3,
+    stroke = 1.2,
+    fill = "white",
+    color = median_color
+  ) +
+
+  # Three sampling windows
+  facet_wrap(
+    ~ Window,
+    nrow = 1,
+    scales = "free_x"
+  ) +
+
+  scale_x_continuous(
+    breaks = seq(0, 28, by = 4),
+    expand = expansion(mult = c(0.03, 0.05))
+  ) +
+
+  scale_y_continuous(
+    labels = label_comma(),
+    expand = expansion(mult = c(0.02, 0.08))
+  ) +
+
+  labs(
+    title = "Population Pharmacokinetic Profiles",
+    subtitle = "Observed median and 90% empirical concentration interval",
+    x = "Time within sampling window (hours)",
+    y = "Observed concentration (dataset units)",
+    caption = paste(
+      "Royal blue: observed median  |",
+      "Teal shading: 5th–95th percentiles",
+      "\n4-hour bins; minimum 10 subjects per bin"
+    )
+  ) +
+
+  theme_classic(base_size = 13) +
+
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 18,
+      color = "#18283B"
+    ),
+
+    plot.subtitle = element_text(
+      size = 12,
+      color = "#526273",
+      margin = margin(b = 15)
+    ),
+
+    strip.background = element_rect(
+      fill = "#EAF2F7",
+      color = NA
+    ),
+
+    strip.text = element_text(
+      face = "bold",
+      size = 12,
+      color = "#2455A4"
+    ),
+
+    axis.title = element_text(
+      face = "bold",
+      size = 12,
+      color = "#263746"
+    ),
+
+    axis.text = element_text(
+      size = 10,
+      color = "#465666"
+    ),
+
+    axis.line = element_line(
+      color = "#465666",
+      linewidth = 0.5
+    ),
+
+    panel.grid.major.y = element_line(
+      color = "#E8EDF2",
+      linewidth = 0.4
+    ),
+
+    panel.grid.minor = element_blank(),
+
+    panel.spacing = grid::unit(1.3, "lines"),
+
+    plot.caption = element_text(
+      size = 9,
+      color = "#526273",
+      hjust = 0,
+      margin = margin(t = 12)
+    ),
+
+    plot.margin = margin(18, 20, 15, 18)
+  )
+
+# Display figure
+print(p_pk)
+
+# Save high-resolution figure
+dir.create(
+  "results/figures",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+ggsave(
+  filename = "results/figures/Population_PK_Three_Panels.png",
+  plot = p_pk,
+  width = 12,
+  height = 5.8,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+
+```{r}
+
+# Simulation 1: Observed PK Concentration-Time Profiles
+
+#This analysis visualizes the observed pharmacokinetic
+#concentration-time profiles for the first 10 subjects
+#in the dataset.
+
+#Only valid observation records were included
+# Select valid observation records
+pk_obs <- pk_data %>%
+  filter(
+    EVID == 0,
+    MDV == 0,
+    DV > 0,
+    TIME >= 0
+  )
+
+# Select the first 10 subjects
+subjects <- sort(unique(pk_obs$ID))[1:10]
+
+# Prepare data for visualization
+pk_10 <- pk_obs %>%
+  filter(ID %in% subjects) %>%
+  arrange(ID, TIME) %>%
+  mutate(ID = factor(ID, levels = subjects))
+
+# Verify results
+print(subjects)
+dim(pk_10)
+# =====================================================
+# SIMULATION 1: OBSERVED PK CONCENTRATION-TIME PROFILES
+# =====================================================
+
+library(dplyr)
+library(ggplot2)
+
+# 1. Select valid observation records
+pk_obs <- pk_data %>%
+  filter(
+    EVID == 0,
+    MDV == 0,
+    DV > 0,
+    TIME >= 0
+  )
+
+# 2. Select the first 10 subjects
+subjects <- sort(unique(pk_obs$ID))[1:10]
+
+# 3. Filter selected subjects
+pk_10 <- pk_obs %>%
+  filter(ID %in% subjects) %>%
+  arrange(ID, TIME) %>%
+  mutate(ID = factor(ID, levels = subjects))
+
+# 4. Generate observed concentration-time profiles
+p_sim1 <- ggplot(
+  pk_10,
+  aes(
+    x = TIME,
+    y = DV,
+    color = ID,
+    group = ID
+  )
+) +
+  geom_line(
+    linewidth = 1.2,
+    alpha = 1
+  ) +
+  geom_point(
+    size = 2,
+    alpha = 0.9
+  ) +
+  scale_color_brewer(palette = "Paired") +
+  labs(
+    title = "One-Compartment PK: Observed Concentration-Time Profiles",
+    x = "Time (hours)",
+    y = "Observed concentration (dataset units)",
+    color = "Subjects"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13),
+    legend.position = "right",
+    panel.grid.major = element_line(
+      color = "grey85",
+      linewidth = 0.3
+    ),
+    panel.grid.minor = element_blank()
+  )
+
+# 5. Display figure
+print(p_sim1)
+
+# 6. Save figure
+dir.create(
+  "results/figures",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+ggsave(
+  filename = "results/figures/Observed_PK_Profiles.png",
+  plot = p_sim1,
+  width = 15,
+  height = 6,
+  dpi = 300,
+  bg = "white"
+)
+
+# 7. Verify selected subjects
+cat("Number of subjects:", length(subjects), "\n")
+
+```
+
+
+# Monte Carlo Simulation of 10,000 Virtual Subjects
+
+## Objective
+
+To evaluate interindividual variability in drug exposure using a one-compartment intravenous bolus pharmacokinetic model and Monte Carlo simulation.
+
+A virtual population of 10,000 subjects was generated by resampling individual clearance and volume of distribution parameters from the original simulated dataset.
+
+Repeated-dose concentrations were predicted using superposition:
+
+\[
+C_i(t) = \sum_{j:t_{ij}\leq t}
+\frac{D_{ij}}{V_i}
+\exp\left[-\frac{CL_i}{V_i}(t-t_{ij})\right]
+\]
+
+where \(D_{ij}\) is the administered dose, \(t_{ij}\) is its administration time, and \(CL_i\) and \(V_i\) are the clearance and volume parameters for virtual subject \(i\).
+
+## Simulation Methodology
+
+Individual parameter pairs and complete dosing histories were resampled together from the original subjects. The original relationship between clearance, volume, and dosing history was therefore preserved in the empirical resampling scheme.
+
+A fixed random seed was used to ensure reproducibility.
+
+## Interpretation
+
+The Monte Carlo simulation predicts concentration–time profiles for 10,000 virtual subjects using a one-compartment repeated IV bolus model.
+
+The median concentration profile represents the central tendency of simulated exposure, while the 5th–95th percentile interval represents variability in predicted concentrations across the virtual population.
+
+The simulation propagates empirical variability in CL, V, and dosing histories from the original dataset. Because parameters are resampled from existing subjects rather than estimated using a new population model, this analysis represents an empirical, model-based simulation rather than a newly fitted nonlinear mixed-effects population PK model.
+
+The resulting profiles can be used to investigate concentration variability and subsequently evaluate hypothetical exposure target attainment.
+
+## Reproducibility
+
+The simulation uses a fixed random seed and exports the predicted population concentration summaries, virtual subject parameters, and a high-resolution figure.
+
+```{r sim1-observed-profiles, echo=TRUE, warning=FALSE, message=FALSE, fig.width=15, fig.height=7, dpi=150}
+# Simulation 1: Observed PK Concentration-Time Profiles
+
+#This analysis visualizes the observed pharmacokinetic concentration-time profiles for the first 10 subjects in the dataset. Only valid observation records (`EVID == 0`, `MDV == 0`, `DV > 0`, `TIME >= 0`) are included. Concentrations are shown on a log scale so that both peaks and troughs are readable.
+
+
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# =====================================================
+# SIMULATION 1: OBSERVED PK CONCENTRATION-TIME PROFILES
+# =====================================================
+
+# ---- Settings -------------------------------------------------
+bg_color    <- "white"      # try "#CDEBFA" for sky blue
+line_color  <- "#1E2F7A"    # highlighted subject
+point_color <- "#F47735"
+dose_color  <- "#C99700"
+grey_color  <- "#B8C2CC"
+
+# ---- 1. Data prep ---------------------------------------------
+pk_obs <- pk_data %>%
+  filter(EVID == 0, MDV == 0, DV > 0, TIME >= 0)
+
+subjects <- sort(unique(pk_obs$ID))[1:10]
+
+pk_10 <- pk_obs %>%
+  filter(ID %in% subjects) %>%
+  arrange(ID, TIME) %>%
+  mutate(ID = factor(ID, levels = subjects))
+
+dose_10 <- pk_data %>%
+  filter(EVID == 1, AMT > 0, ID %in% subjects) %>%
+  distinct(ID, TIME) %>%
+  mutate(ID = factor(ID, levels = subjects))
+
+pk_bg <- pk_10 %>% rename(ID_bg = ID)
+
+# ---- 2. Shared theme ------------------------------------------
+theme_pk <- theme_minimal(base_size = 13) +
+  theme(
+    plot.background   = element_rect(fill = bg_color, color = NA),
+    panel.background  = element_rect(fill = bg_color, color = NA),
+    plot.title.position   = "plot",
+    plot.caption.position = "plot",
+    plot.title    = element_text(face = "bold", size = 20, color = "#172B4D"),
+    plot.subtitle = element_text(size = 12, color = "#475569", margin = margin(b = 12)),
+    plot.caption  = element_text(size = 9, color = "#64748B", hjust = 0, margin = margin(t = 12)),
+    axis.title    = element_text(face = "bold", size = 11, color = "#263746"),
+    axis.text     = element_text(size = 9.5, color = "#465666"),
+    panel.grid.major = element_line(color = "#E2E8F0", linewidth = 0.35),
+    panel.grid.minor = element_blank(),
+    strip.text    = element_text(face = "bold", size = 11, color = "#172B4D", hjust = 0),
+    panel.spacing = unit(1.1, "lines"),
+    plot.margin   = margin(18, 22, 14, 18)
+  )
+
+# ---- 3. Figure A: one panel per subject -----------------------
+p_sim1 <- ggplot(pk_10, aes(TIME, DV)) +
+  geom_line(data = pk_bg, aes(group = ID_bg),
+            color = grey_color, linewidth = 0.35, alpha = 0.7) +
+  geom_vline(data = dose_10, aes(xintercept = TIME),
+             color = dose_color, linetype = "dashed", linewidth = 0.4, alpha = 0.8) +
+  geom_line(aes(group = ID), color = line_color, linewidth = 0.9) +
+  geom_point(shape = 21, fill = point_color, color = "white",
+             size = 1.9, stroke = 0.4) +
+  facet_wrap(~ ID, ncol = 5,
+             labeller = labeller(ID = function(x) paste("Subject", x))) +
+  scale_x_continuous(breaks = seq(0, 288, 72),
+                     expand = expansion(mult = c(0.02, 0.03))) +
+  scale_y_log10(labels = label_comma(), breaks = log_breaks(n = 5)) +
+  labs(
+    title    = "Observed Concentration–Time Profiles",
+    subtitle = "First 10 subjects  •  one-compartment repeated IV bolus  •  each panel highlights one subject against the others",
+    x = "Time (hours)",
+    y = "Concentration (dataset units, log scale)",
+    caption  = "Dashed gold lines: recorded dosing times  •  Grey lines: all other subjects"
+  ) +
+  theme_pk
+
+# ---- 4. Figure B: single-panel overview -----------------------
+p_sim1_overview <- ggplot(pk_10, aes(TIME, DV, color = ID, group = ID)) +
+  geom_vline(data = dose_10 %>% distinct(TIME), aes(xintercept = TIME),
+             inherit.aes = FALSE, color = dose_color,
+             linetype = "dashed", linewidth = 0.4, alpha = 0.7) +
+  geom_line(linewidth = 0.7, alpha = 0.85) +
+  geom_point(size = 1.4, alpha = 0.9) +
+  scale_color_viridis_d(option = "turbo", end = 0.92, name = "Subject") +
+  scale_x_continuous(breaks = seq(0, 288, 24),
+                     expand = expansion(mult = c(0.01, 0.02))) +
+  scale_y_log10(labels = label_comma(), breaks = log_breaks(n = 6)) +
+  labs(
+    title    = "Observed Concentration–Time Profiles",
+    subtitle = "First 10 subjects  •  log-scaled concentration",
+    x = "Time (hours)",
+    y = "Concentration (dataset units, log scale)",
+    caption  = "Dashed gold lines: recorded dosing times"
+  ) +
+  guides(color = guide_legend(nrow = 1,
+                              override.aes = list(linewidth = 1.5, size = 2.5))) +
+  theme_pk +
+  theme(legend.position = "top", legend.justification = "left")
+
+# ---- 5. Display and save --------------------------------------
+print(p_sim1)
+print(p_sim1_overview)
+
+dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
+
+ggsave("results/figures/Observed_PK_Profiles_Panels.png", p_sim1,
+       width = 15, height = 7, dpi = 300, bg = bg_color)
+ggsave("results/figures/Observed_PK_Profiles_Overview.png", p_sim1_overview,
+       width = 12, height = 6.5, dpi = 300, bg = bg_color)
+
+cat("Number of subjects:", length(subjects), "\n")
+```
+
+
+```{r fix-monte-carlo-summary, message=FALSE, warning=FALSE}
+# Recover the simulation summary from saved results
+summary_file <- "results/tables/Monte_Carlo_Concentration_Summary.csv"
+
+if (file.exists(summary_file)) {
+
+  simulation_summary <- read.csv(summary_file)
+
+} else if (
+  exists("simulation_matrix") &&
+  exists("simulation_time")
+) {
+
+  simulation_summary <- data.frame(
+    TIME = simulation_time,
+    Median = apply(simulation_matrix, 2, median),
+    P05 = apply(simulation_matrix, 2, quantile, probs = 0.05),
+    P95 = apply(simulation_matrix, 2, quantile, probs = 0.95)
+  )
+
+} else {
+
+  stop(
+    "Monte Carlo results are missing. ",
+    "Run the complete 10,000-subject simulation ",
+    "before creating the enhanced figure."
+  )
+}
+
+head(simulation_summary)
+```
+
+
+```{r monte-carlo-enhanced-plot, echo=TRUE, warning=FALSE, message=FALSE, fig.width=13, fig.height=7, dpi=150}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+## Enhanced Monte Carlo Simulation Visualization
+
+#This visualization compares observed pharmacokinetic concentrations with simulated population concentrations from 10,000 #virtual subjects using a one-compartment repeated intravenous bolus model.
+
+
+# ============================================================
+# ENHANCED MONTE CARLO SIMULATION VISUALIZATION
+# 10,000 VIRTUAL SUBJECTS
+# ============================================================
+
+# 1. Define professional color palette
+median_color <- "#7038C6"
+interval_color <- "#00C9B7"
+observed_color <- "#FF6B35"
+dose_color <- "#D4A017"
+
+# 2. Prepare observed concentrations
+# Summarize observations in 4-hour bins
+observed_summary <- pk_data %>%
+  filter(
+    EVID == 0,
+    MDV == 0,
+    is.finite(DV),
+    DV > 0,
+    is.finite(TIME),
+    TIME >= 0
+  ) %>%
+  mutate(
+    Time_Bin = floor(TIME / 4) * 4
+  ) %>%
+  group_by(ID, Time_Bin) %>%
+  summarise(
+    DV = median(DV),
+    .groups = "drop"
+  ) %>%
+  group_by(Time_Bin) %>%
+  summarise(
+    N = n(),
+    Observed_Median = median(DV),
+    .groups = "drop"
+  ) %>%
+  filter(N >= 10)
+
+# 3. Identify actual dose administration times
+dose_times <- pk_data %>%
+  filter(
+    EVID == 1,
+    AMT > 0,
+    is.finite(TIME)
+  ) %>%
+  distinct(TIME) %>%
+  arrange(TIME)
+
+# 4. Generate enhanced Monte Carlo plot
+p_mc_beautiful <- ggplot() +
+
+  # 90% simulated population prediction interval
+  geom_ribbon(
+    data = simulation_summary,
+    aes(
+      x = TIME,
+      ymin = P05,
+      ymax = P95,
+      fill = "90% prediction interval"
+    ),
+    alpha = 0.27
+  ) +
+
+  # Dose administration indicators
+  geom_vline(
+    data = dose_times,
+    aes(xintercept = TIME),
+    color = dose_color,
+    linetype = "dotted",
+    linewidth = 0.55,
+    alpha = 0.60
+  ) +
+
+  # Dashed simulated median concentration
+  geom_line(
+    data = simulation_summary,
+    aes(
+      x = TIME,
+      y = Median,
+      color = "Simulated median"
+    ),
+    linewidth = 1.35,
+    linetype = "longdash",
+    lineend = "round"
+  ) +
+
+  # Observed median concentrations
+  geom_point(
+    data = observed_summary,
+    aes(
+      x = Time_Bin,
+      y = Observed_Median,
+      color = "Observed median"
+    ),
+    shape = 21,
+    fill = observed_color,
+    stroke = 0.7,
+    size = 2.5,
+    alpha = 0.90
+  ) +
+
+  # Manual scientific color palette
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Simulated median" = median_color,
+      "Observed median" = observed_color
+    )
+  ) +
+
+  scale_fill_manual(
+    name = NULL,
+    values = c(
+      "90% prediction interval" = interval_color
+    )
+  ) +
+
+  # X-axis
+  scale_x_continuous(
+    breaks = seq(0, 288, by = 24),
+    limits = c(0, 288),
+    expand = c(0, 0)
+  ) +
+
+  # Y-axis
+  scale_y_continuous(
+    labels = label_comma(),
+    expand = expansion(mult = c(0.02, 0.08))
+  ) +
+
+  # Labels
+  labs(
+    title = "Population PK Monte Carlo Simulation",
+    subtitle = paste(
+      "10,000 Virtual Subjects |",
+      "One-Compartment Repeated IV Bolus Model"
+    ),
+    x = "Time (hours)",
+    y = "Drug concentration (dataset units)",
+    caption = paste(
+      "Purple dashed line: simulated median |",
+      "Turquoise shading: 5th–95th prediction interval",
+      "\nCoral points: observed binned medians |",
+      "Gold dotted lines: recorded dosing times"
+    )
+  ) +
+
+  # Professional white background
+  theme_minimal(base_size = 14) +
+
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 20,
+      color = "#20243A"
+    ),
+
+    plot.subtitle = element_text(
+      size = 12,
+      color = "#596579",
+      margin = margin(b = 16)
+    ),
+
+    axis.title = element_text(
+      face = "bold",
+      size = 12,
+      color = "#26334D"
+    ),
+
+    axis.text = element_text(
+      size = 11,
+      color = "#46556A"
+    ),
+
+    panel.grid.major = element_line(
+      color = "#E7EBF2",
+      linewidth = 0.35
+    ),
+
+    panel.grid.minor = element_blank(),
+
+    legend.position = "bottom",
+
+    legend.text = element_text(
+      size = 11
+    ),
+
+    legend.box = "horizontal",
+
+    plot.caption = element_text(
+      size = 9,
+      color = "#64748B",
+      hjust = 0,
+      margin = margin(t = 15)
+    ),
+
+    plot.margin = margin(20, 25, 20, 20)
+  ) +
+
+  guides(
+    color = guide_legend(order = 1),
+    fill = guide_legend(order = 2)
+  )
+
+# 5. Display figure
+print(p_mc_beautiful)
+
+# 6. Save publication-quality figure
+dir.create(
+  "results/figures",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+ggsave(
+  filename = "results/figures/Monte_Carlo_10000_Enhanced.png",
+  plot = p_mc_beautiful,
+  width = 13,
+  height = 7,
+  dpi = 300,
+  bg = "white"
+)
+
+# 7. Save vector-format figure
+ggsave(
+  filename = "results/figures/Monte_Carlo_10000_Enhanced.pdf",
+  plot = p_mc_beautiful,
+  width = 13,
+  height = 7,
+  bg = "white"
+)
+
+cat(
+  "\nEnhanced Monte Carlo figure saved successfully.\n"
+)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# ------------------------------------------------------------
+# 0. Optional: nicer font (falls back silently if unavailable)
+# ------------------------------------------------------------
+font_family <- "sans"
+try({
+  sysfonts::font_add_google("Inter", "Inter")
+  showtext::showtext_auto()
+  font_family <- "Inter"
+}, silent = TRUE)
+
+# ------------------------------------------------------------
+# 1. Data prep
+# ------------------------------------------------------------
+bin_width <- 4
+
+observed_summary <- pk_data %>%
+  filter(EVID == 0, MDV == 0, is.finite(DV), DV > 0,
+         is.finite(TIME), TIME >= 0) %>%
+  mutate(Time_Bin = floor(TIME / bin_width) * bin_width) %>%
+  group_by(ID, Time_Bin) %>%
+  summarise(DV = median(DV), .groups = "drop") %>%
+  group_by(Time_Bin) %>%
+  summarise(
+    N               = n(),
+    Observed_Median = median(DV),
+    Obs_Q25         = quantile(DV, 0.25),
+    Obs_Q75         = quantile(DV, 0.75),
+    .groups = "drop"
+  ) %>%
+  filter(N >= 10) %>%
+  mutate(Time_Mid = Time_Bin + bin_width / 2)
+
+dose_times <- pk_data %>%
+  filter(EVID == 1, AMT > 0, is.finite(TIME)) %>%
+  distinct(TIME) %>%
+  arrange(TIME)
+
+# The 50% band is drawn only if simulation_summary has P25 and P75
+has_iqr <- all(c("P25", "P75") %in% names(simulation_summary))
+
+# ------------------------------------------------------------
+# 2. Sky-blue palette
+# ------------------------------------------------------------
+bg_color <- "#CDEBFA"   # sky-blue background (change here to adjust)
+
+pal <- list(
+  bg      = bg_color,
+  text    = "#0B2545",
+  subtext = "#34506E",
+  grid    = "#A9D3EC",
+  median  = "#1E3A8A",   # deep navy
+  band90  = "#0369A1",   # strong blue
+  band50  = "#075985",
+  obs     = "#F97316",   # orange
+  dose    = "#B45309",
+  a90     = 0.20,
+  a50     = 0.30
+)
+
+# ------------------------------------------------------------
+# 3. Plot
+# ------------------------------------------------------------
+make_mc_plot <- function(log_y = FALSE) {
+
+  ggplot() +
+    # 90% prediction interval
+    geom_ribbon(data = simulation_summary,
+                aes(TIME, ymin = P05, ymax = P95, fill = "90% prediction interval"),
+                alpha = pal$a90) +
+    # 50% prediction interval (optional)
+    { if (has_iqr)
+        geom_ribbon(data = simulation_summary,
+                    aes(TIME, ymin = P25, ymax = P75, fill = "50% prediction interval"),
+                    alpha = pal$a50) } +
+    # faint dose guide lines
+    geom_vline(data = dose_times, aes(xintercept = TIME),
+               color = pal$dose, linewidth = 0.3, alpha = 0.20) +
+    # soft glow under the median
+    geom_line(data = simulation_summary, aes(TIME, Median),
+              color = pal$median, linewidth = 4.5, alpha = 0.08, show.legend = FALSE) +
+    geom_line(data = simulation_summary, aes(TIME, Median),
+              color = pal$median, linewidth = 2.6, alpha = 0.15, show.legend = FALSE) +
+    # median line
+    geom_line(data = simulation_summary,
+              aes(TIME, Median, color = "Simulated median"),
+              linewidth = 1.3, lineend = "round") +
+    # observed IQR whiskers
+    geom_linerange(data = observed_summary,
+                   aes(x = Time_Mid, ymin = Obs_Q25, ymax = Obs_Q75),
+                   color = pal$obs, linewidth = 0.6, alpha = 0.70) +
+    # observed medians
+    geom_point(data = observed_summary,
+               aes(Time_Mid, Observed_Median, color = "Observed median (IQR)"),
+               shape = 21, fill = pal$obs, stroke = 1, size = 3.2) +
+    # dose ticks on the x-axis
+    geom_rug(data = dose_times, aes(x = TIME), inherit.aes = FALSE,
+             sides = "b", color = pal$dose, linewidth = 0.9,
+             length = unit(0.035, "npc"), alpha = 0.95) +
+
+    scale_color_manual(NULL, values = c(
+      "Simulated median"      = pal$median,
+      "Observed median (IQR)" = pal$obs)) +
+    scale_fill_manual(NULL,
+      values = c("90% prediction interval" = pal$band90,
+                 "50% prediction interval" = pal$band50),
+      breaks = c("90% prediction interval", "50% prediction interval")) +
+
+    scale_x_continuous(breaks = seq(0, 288, 24), limits = c(0, 288),
+                       expand = expansion(mult = c(0.005, 0.01))) +
+    { if (log_y)
+        scale_y_log10(labels = label_comma(), expand = expansion(mult = c(0.02, 0.08)))
+      else
+        scale_y_continuous(labels = label_comma(), expand = expansion(mult = c(0.02, 0.08))) } +
+
+    labs(
+      title    = "Population PK Monte Carlo Simulation",
+      subtitle = "10,000 virtual subjects  •  one-compartment repeated IV bolus model",
+      x = "Time (hours)", y = "Concentration (dataset units)",
+      caption  = "Ticks on the x-axis mark dosing times  •  Observed data binned every 4 h (bins with N ≥ 10)"
+    ) +
+
+    theme_minimal(base_size = 14, base_family = font_family) +
+    theme(
+      plot.background  = element_rect(fill = pal$bg, color = NA),
+      panel.background = element_rect(fill = pal$bg, color = NA),
+      text             = element_text(color = pal$text),
+      plot.title.position = "plot",
+      plot.title    = element_text(face = "bold", size = 24, color = pal$text),
+      plot.subtitle = element_text(size = 13, color = pal$subtext, margin = margin(b = 14)),
+      axis.title    = element_text(size = 12, color = pal$subtext),
+      axis.text     = element_text(size = 11, color = pal$subtext),
+      panel.grid.major.y = element_line(color = pal$grid, linewidth = 0.4),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor   = element_blank(),
+      legend.position      = "top",
+      legend.justification = "left",
+      legend.text   = element_text(size = 11, color = pal$text),
+      legend.key.height = unit(0.5, "cm"),
+      legend.margin = margin(0, 0, 8, 0),
+      plot.caption  = element_text(size = 9, color = pal$subtext, hjust = 0, margin = margin(t = 14)),
+      plot.caption.position = "plot",
+      plot.margin   = margin(24, 28, 18, 24)
+    ) +
+    guides(
+      color = guide_legend(order = 1, override.aes = list(linewidth = 1.3, size = 3)),
+      fill  = guide_legend(order = 2)
+    )
+}
+
+# ------------------------------------------------------------
+# 4. Build, preview, and save
+# ------------------------------------------------------------
+p_skyblue <- make_mc_plot()
+print(p_skyblue)
+
+dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
+
+ggsave("results/figures/Monte_Carlo_10000_skyblue.png", p_skyblue,
+       width = 12, height = 6.75, dpi = 200, bg = bg_color)
+ggsave("results/figures/Monte_Carlo_10000_skyblue.pdf", p_skyblue,
+       width = 12, height = 6.75, device = cairo_pdf, bg = bg_color)
+
+cat("\nSky-blue Monte Carlo figure saved successfully.\n")
+```
+
+
+
+## Monte Carlo Model Validation
+
+This figure compares observed pharmacokinetic concentrations (binned medians with IQR) with simulated population concentrations from 10,000 virtual subjects using a one-compartment repeated intravenous bolus model. Observed medians that fall outside the simulated 90% prediction interval are highlighted in red.
+
+```{r monte-carlo-validation-plot, echo=TRUE, warning=FALSE, message=FALSE, fig.width=13, fig.height=7, dpi=150}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# ============================================================
+# MONTE CARLO VALIDATION FIGURE (10,000 VIRTUAL SUBJECTS)
+# ============================================================
+
+# ---- Settings -------------------------------------------------
+bg_color   <- "white"      # try "#CDEBFA" for the sky-blue version
+bin_width  <- 4
+
+sim_color  <- "#1E2F7A"    # simulated median
+band_color <- "#4FA3E0"    # prediction bands
+obs_color  <- "#F47735"    # observed (inside interval)
+out_color  <- "#D62839"    # observed (outside interval)
+dose_color <- "#C99700"
+
+# ---- 1. Observed summary -------------------------------------
+observed_summary <- pk_data %>%
+  filter(EVID == 0, MDV == 0, is.finite(DV), DV > 0,
+         is.finite(TIME), TIME >= 0) %>%
+  mutate(Time_Bin = floor(TIME / bin_width) * bin_width) %>%
+  group_by(ID, Time_Bin) %>%
+  summarise(DV = median(DV), .groups = "drop") %>%
+  group_by(Time_Bin) %>%
+  summarise(N = n(),
+            Median = median(DV),
+            Q1 = quantile(DV, 0.25),
+            Q3 = quantile(DV, 0.75),
+            .groups = "drop") %>%
+  filter(N >= 10) %>%
+  mutate(Time_Mid = Time_Bin + bin_width / 2)
+
+# ---- 2. Coverage check vs simulated 90% interval -------------
+ss <- simulation_summary %>% arrange(TIME)
+
+observed_summary <- observed_summary %>%
+  mutate(
+    Sim_P05 = approx(ss$TIME, ss$P05, xout = Time_Mid, rule = 2)$y,
+    Sim_P95 = approx(ss$TIME, ss$P95, xout = Time_Mid, rule = 2)$y,
+    Inside  = Median >= Sim_P05 & Median <= Sim_P95,
+    Status  = ifelse(Inside, "Observed median (IQR)",
+                             "Observed median outside 90% PI")
+  )
+
+n_in  <- sum(observed_summary$Inside)
+n_tot <- nrow(observed_summary)
+coverage_label <- sprintf("%d of %d observed medians (%.0f%%) fall within the simulated 90%% interval",
+                          n_in, n_tot, 100 * n_in / n_tot)
+
+# ---- 3. Dose times and optional 50% band ---------------------
+dose_times <- pk_data %>%
+  filter(EVID == 1, AMT > 0, is.finite(TIME)) %>%
+  distinct(TIME) %>%
+  arrange(TIME)
+
+has_iqr <- all(c("P25", "P75") %in% names(simulation_summary))
+
+# ---- 4. Plot --------------------------------------------------
+col_values <- c("Simulated median"                = sim_color,
+                "Observed median (IQR)"           = obs_color,
+                "Observed median outside 90% PI"  = out_color)
+
+p_mc_final <- ggplot() +
+
+  geom_ribbon(data = simulation_summary,
+              aes(TIME, ymin = P05, ymax = P95, fill = "90% prediction interval"),
+              alpha = 0.22) +
+
+  { if (has_iqr)
+      geom_ribbon(data = simulation_summary,
+                  aes(TIME, ymin = P25, ymax = P75, fill = "50% prediction interval"),
+                  alpha = 0.32) } +
+
+  geom_vline(data = dose_times, aes(xintercept = TIME),
+             color = dose_color, linewidth = 0.3, alpha = 0.18) +
+
+  geom_line(data = simulation_summary,
+            aes(TIME, Median, color = "Simulated median"),
+            linewidth = 1.4, lineend = "round") +
+
+  # observed IQR whiskers
+  geom_linerange(data = observed_summary,
+                 aes(x = Time_Mid, ymin = Q1, ymax = Q3),
+                 color = obs_color, linewidth = 0.7, alpha = 0.75) +
+
+  # white halo so points stay readable over bands and lines
+  geom_point(data = observed_summary,
+             aes(Time_Mid, Median),
+             shape = 16, size = 5.2, color = "white") +
+
+  geom_point(data = observed_summary,
+             aes(Time_Mid, Median, color = Status),
+             shape = 16, size = 3.6) +
+
+  geom_rug(data = dose_times, aes(x = TIME), inherit.aes = FALSE,
+           sides = "b", color = dose_color, linewidth = 0.9,
+           length = unit(0.035, "npc")) +
+
+  scale_color_manual(NULL, values = col_values, limits = names(col_values)) +
+  scale_fill_manual(NULL,
+                    values = c("90% prediction interval" = band_color,
+                               "50% prediction interval" = band_color),
+                    breaks = c("90% prediction interval", "50% prediction interval")) +
+
+  scale_x_continuous(breaks = seq(0, 288, 24), limits = c(0, 288),
+                     expand = expansion(mult = c(0.005, 0.01))) +
+  scale_y_continuous(labels = label_comma(),
+                     expand = expansion(mult = c(0.03, 0.08))) +
+
+  labs(
+    title    = "Population PK Model Validation",
+    subtitle = paste0("10,000 virtual subjects  •  one-compartment repeated IV bolus model\n",
+                      coverage_label),
+    x = "Time (hours)",
+    y = "Concentration (dataset units)",
+    caption = paste0("Observed: median and IQR of subject-level values in ", bin_width,
+                     "-h bins (N ≥ 10 subjects), plotted at bin midpoints  •  ",
+                     "Simulated: median and 5th–95th percentiles  •  Gold ticks: dosing times")
+  ) +
+
+  theme_classic(base_size = 14) +
+  theme(
+    plot.background  = element_rect(fill = bg_color, color = NA),
+    panel.background = element_rect(fill = bg_color, color = NA),
+    plot.title.position   = "plot",
+    plot.caption.position = "plot",
+    plot.title    = element_text(face = "bold", size = 22, color = "#172B4D"),
+    plot.subtitle = element_text(size = 12, color = "#475569", lineheight = 1.25,
+                                 margin = margin(b = 12)),
+    axis.title    = element_text(face = "bold", size = 12, color = "#263746"),
+    axis.text     = element_text(size = 10.5, color = "#465666"),
+    axis.line     = element_line(color = "#94A3B8", linewidth = 0.5),
+    axis.ticks    = element_line(color = "#94A3B8"),
+    panel.grid.major.y = element_line(color = "#E2E8F0", linewidth = 0.4),
+    panel.grid.minor   = element_blank(),
+    legend.position      = "top",
+    legend.justification = "left",
+    legend.text   = element_text(size = 11),
+    legend.margin = margin(0, 0, 6, 0),
+    plot.caption  = element_text(size = 8.5, color = "#64748B", hjust = 0,
+                                 margin = margin(t = 12)),
+    plot.margin   = margin(20, 24, 16, 20)
+  ) +
+  guides(
+    color = guide_legend(
+      order = 1,
+      override.aes = list(linetype = c("solid", "blank", "blank"),
+                          shape    = c(NA, 16, 16),
+                          linewidth = c(1.4, 0, 0),
+                          size      = c(0, 3.6, 3.6))
+    ),
+    fill = guide_legend(order = 2)
+  )
+
+# ---- 5. Display and save -------------------------------------
+print(p_mc_final)
+
+dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
+
+ggsave("results/figures/Monte_Carlo_10000_Validation.png", p_mc_final,
+       width = 13, height = 7, dpi = 300, bg = bg_color)
+ggsave("results/figures/Monte_Carlo_10000_Validation.pdf", p_mc_final,
+       width = 13, height = 7, device = cairo_pdf, bg = bg_color)
+
+cat("\n", coverage_label, "\n", sep = "")
+```
+
+
+
+
